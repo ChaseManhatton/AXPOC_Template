@@ -126,7 +126,7 @@
         "description": "VM Admin Password (8 Character Minimum)?"
       }
     },
-    "VMStorageAccountType": {
+    "appServerStorageAccountsType": {
       "type": "string",
       "defaultValue": "Standard_LRS",
       "allowedValues": [
@@ -135,6 +135,24 @@
         "Standard_GRS",
         "Standard_RAGRS",
         "Premium_LRS"
+      ]
+    },
+    "dataDiskSize": {
+      "type": "int",
+      "defaultValue": 60,
+      "minValue": 20,
+      "maxValue": 200,
+      "metadata": { "description": "Size of Data Disks For App Servers (in GBs)?" }
+    },
+    "batchVMsSize": {
+      "type": "string",
+      "defaultValue": "Standard_A6",
+      "allowedValues": [
+        "Standard_A2",
+        "Standard_A3",
+        "Standard_A4",
+        "Standard_A5",
+        "Standard_A6"
       ]
     },
     "VMsWindowsOSVersion": {
@@ -146,6 +164,31 @@
         "2012-R2-Datacenter",
         "Windows-Server-Technical-Preview"
       ]
+    },
+    "domainToJoin": {
+      "type": "string",
+      "metadata": {
+        "description": "The FQDN of the AD domain"
+      }
+    },
+    "domainUsername": {
+      "type": "string",
+      "metadata": {
+        "description": "Username of the account on the domain"
+      }
+    },
+    "domainPassword": {
+      "type": "securestring",
+      "metadata": {
+        "description": "Password of the account on the domain"
+      }
+    },
+    "domainJoinOptions": {
+      "type": "int",
+      "defaultValue": 3,
+      "metadata": {
+        "description": "Set of bit flags that define the join options. Default value of 3 is a combination of NETSETUP_JOIN_DOMAIN (0x00000001) & NETSETUP_ACCT_CREATE (0x00000002) i.e. will join the domain and create the account on the domain. For more information see https://msdn.microsoft.com/en-us/library/aa392154(v=vs.85).aspx"
+      }
     }
   },
   "variables": {
@@ -161,20 +204,9 @@
     "AxcessPOCFESubnetCIDR": "[parameters('frontendSubnetCIDR')]",
     "appServerNICsVnetID": "[resourceId('AxcessPOC_VNET', 'Microsoft.Network/virtualNetworks', parameters('vnetName'))]",
     "appServerNICsSubnetRef": "[concat(variables('appServerNICsVnetID'), '/subnets/', variables('AxcessPOCFESubnetName'))]",
-    "batchStorageAccountName": "[concat('batchStorageAccount', uniqueString(resourceGroup().id))]",
-    "TestVNETPrefix": "10.0.0.0/16",
-    "TestVNETSubnet1Name": "Subnet-1",
-    "TestVNETSubnet1Prefix": "10.0.0.0/24",
-    "TestVNETSubnet2Name": "Subnet-2",
-    "TestVNETSubnet2Prefix": "10.0.1.0/24",
-    "batchVMsImagePublisher": "MicrosoftWindowsServer",
-    "batchVMsImageOffer": "WindowsServer",
-    "batchVMsOSDiskName": "batchVMsOSDisk",
-    "batchVMsVmSize": "Standard_D1",
-    "batchVMsVnetID": "[resourceId('Microsoft.Network/virtualNetworks', 'TestVNET')]",
-    "batchVMsSubnetRef": "[concat(variables('batchVMsVnetID'), '/subnets/', variables('TestVNETSubnet1Name'))]",
-    "batchVMsStorageAccountContainerName": "vhds",
-    "batchVMsNicName": "[concat(parameters('batchVMsName'), 'NetworkInterface')]"
+    "appServerStorageAccountsName": "[concat('appServerStorageAccounts', uniqueString(resourceGroup().id))]",
+    "batchVMsVmSize": "[parameters('batchVMsSize')]",
+    "prepDataDriveCommand": "Initialize-Disk 2;Start-Sleep -s 2;New-Partition –DiskNumber 2 -UseMaximumSize -DriveLetter Z;Start-Sleep -s 2;Format-Volume –DriveLetter Z –FileSystem NTFS -NewFileSystemLabel DATA -Confirm:$false"
   },
   "resources": [
     {
@@ -192,6 +224,22 @@
       "copy": {
         "count": "[length(parameters('serverTypes'))]",
         "name": "appServerAvailSetsCopy"
+      }
+    },
+    {
+      "name": "[toLower(concat(parameters('appServerHostNamePrefix'), parameters('serverTypes')[copyIndex()]))]",
+      "type": "Microsoft.Storage/storageAccounts",
+      "location": "[resourceGroup().location]",
+      "apiVersion": "2015-06-15",
+      "tags": {
+        "displayName": "appServerStorageAccounts"
+      },
+      "properties": {
+        "accountType": "[parameters('appServerStorageAccountsType')]"
+      },
+      "copy": {
+        "name": "appServerStorageAccountsCopy",
+        "count": "[length(parameters('serverTypes'))]"
       }
     },
     {
@@ -403,82 +451,14 @@
       }
     },
     {
-      "name": "[variables('batchStorageAccountName')]",
-      "type": "Microsoft.Storage/storageAccounts",
-      "location": "[resourceGroup().location]",
-      "apiVersion": "2015-06-15",
-      "dependsOn": [ ],
-      "tags": {
-        "displayName": "batchStorageAccount"
-      },
-      "properties": {
-        "accountType": "[parameters('batchStorageAccountType')]"
-      }
-    },
-    {
-      "name": "TestVNET",
-      "type": "Microsoft.Network/virtualNetworks",
-      "location": "[resourceGroup().location]",
-      "apiVersion": "2015-06-15",
-      "dependsOn": [ ],
-      "tags": {
-        "displayName": "TestVNET"
-      },
-      "properties": {
-        "addressSpace": {
-          "addressPrefixes": [
-            "[variables('TestVNETPrefix')]"
-          ]
-        },
-        "subnets": [
-          {
-            "name": "[variables('TestVNETSubnet1Name')]",
-            "properties": {
-              "addressPrefix": "[variables('TestVNETSubnet1Prefix')]"
-            }
-          },
-          {
-            "name": "[variables('TestVNETSubnet2Name')]",
-            "properties": {
-              "addressPrefix": "[variables('TestVNETSubnet2Prefix')]"
-            }
-          }
-        ]
-      }
-    },
-    {
-      "name": "[variables('batchVMsNicName')]",
-      "type": "Microsoft.Network/networkInterfaces",
-      "location": "[resourceGroup().location]",
-      "apiVersion": "2015-06-15",
-      "dependsOn": [
-        "[concat('Microsoft.Network/virtualNetworks/', 'TestVNET')]"
-      ],
-      "tags": {
-        "displayName": "batchVMsNic"
-      },
-      "properties": {
-        "ipConfigurations": [
-          {
-            "name": "ipconfig1",
-            "properties": {
-              "privateIPAllocationMethod": "Dynamic",
-              "subnet": {
-                "id": "[variables('batchVMsSubnetRef')]"
-              }
-            }
-          }
-        ]
-      }
-    },
-    {
-      "name": "[parameters('batchVMsName')]",
+      "name": "[toLower(concat(parameters('appServerHostNamePrefix'), 'batch', copyIndex()))]",
       "type": "Microsoft.Compute/virtualMachines",
       "location": "[resourceGroup().location]",
       "apiVersion": "2015-06-15",
       "dependsOn": [
-        "[concat('Microsoft.Storage/storageAccounts/', variables('batchStorageAccountName'))]",
-        "[concat('Microsoft.Network/networkInterfaces/', variables('batchVMsNicName'))]"
+        "[concat('Microsoft.Storage/storageAccounts/', toLower(concat(parameters('appServerHostNamePrefix'), 'batch')))]",
+        "[concat('Microsoft.Network/networkInterfaces/', toLower(concat(parameters('appServerHostNamePrefix'), 'batch', copyIndex())))]",
+        "[concat('Microsoft.Compute/availabilitySets/', toLower(concat(parameters('appServerHostNamePrefix'), 'batch')))]"
       ],
       "tags": {
         "displayName": "batchVMs"
@@ -488,21 +468,32 @@
           "vmSize": "[variables('batchVMsVmSize')]"
         },
         "osProfile": {
-          "computerName": "[parameters('batchVMsName')]",
-          "adminUsername": "[parameters('batchVMsAdminUsername')]",
-          "adminPassword": "[parameters('batchVMsAdminPassword')]"
+          "computerName": "[toLower(concat(parameters('appServerHostNamePrefix'), 'batch', copyIndex()))]",
+          "adminUsername": "[parameters('vmAdminUsername')]",
+          "adminPassword": "[parameters('vmAdminPassword')]"
         },
         "storageProfile": {
           "imageReference": {
-            "publisher": "[variables('batchVMsImagePublisher')]",
-            "offer": "[variables('batchVMsImageOffer')]",
-            "sku": "[parameters('batchVMsWindowsOSVersion')]",
+            "publisher": "MicrosoftWindowsServer",
+            "offer": "WindowsServer",
+            "sku": "[parameters('VMsWindowsOSVersion')]",
             "version": "latest"
           },
+          "dataDisks": [
+            {
+              "name": "[toLower(concat(parameters('appServerHostNamePrefix'), 'batch', copyIndex(), '-DATA'))]",
+              "diskSizeGB": "[parameters('dataDiskSize')]",
+              "lun": 0,
+              "vhd": {
+                "uri": "[concat('http://', toLower(concat(parameters('appServerHostNamePrefix'), 'batch')), '.blob.core.windows.net/vhds/', toLower(concat(parameters('appServerHostNamePrefix'), 'batch', copyIndex(), '-DATA')), '.vhd')]"
+              },
+              "createOption": "Empty"
+            }
+          ],
           "osDisk": {
-            "name": "batchVMsOSDisk",
+            "name": "[toLower(concat(parameters('appServerHostNamePrefix'), 'batch', copyIndex(), '-OS'))]",
             "vhd": {
-              "uri": "[concat('http://', variables('batchStorageAccountName'), '.blob.core.windows.net/', variables('batchVMsStorageAccountContainerName'), '/', variables('batchVMsOSDiskName'), '.vhd')]"
+              "uri": "[concat('http://', toLower(concat(parameters('appServerHostNamePrefix'), 'batch')), '.blob.core.windows.net/vhds/', toLower(concat(parameters('appServerHostNamePrefix'), 'batch', copyIndex(), '-OS')), '.vhd')]"
             },
             "caching": "ReadWrite",
             "createOption": "FromImage"
@@ -511,10 +502,64 @@
         "networkProfile": {
           "networkInterfaces": [
             {
-              "id": "[resourceId('Microsoft.Network/networkInterfaces', variables('batchVMsNicName'))]"
+              "id": "[resourceId('Microsoft.Network/networkInterfaces', toLower(concat(parameters('appServerHostNamePrefix'), 'batch', copyIndex())))]"
             }
           ]
+        },
+        "availabilitySet": {
+          "id": "[resourceId('Microsoft.Compute/availabilitySets',toLower(concat(parameters('appServerHostNamePrefix'), 'batch')))]"
         }
+      },
+      "copy": {
+        "name": "batchVMsCopy",
+        "count": "[parameters('batchServerCount')]"
+      },
+      "resources": [
+        {
+          "type": "Microsoft.Compute/virtualMachines/extensions",
+          "name": "[toLower(concat(parameters('appServerHostNamePrefix'), 'batch', copyIndex(), '/CustomScriptExtension'))]",
+          "apiVersion": "2015-05-01-preview",
+          "location": "[resourceGroup().location]",
+          "dependsOn": [
+            "[concat('Microsoft.Compute/virtualMachines/', toLower(concat(parameters('appServerHostNamePrefix'), 'batch', copyIndex())))]"
+          ],
+          "properties": {
+            "publisher": "Microsoft.Compute",
+            "type": "CustomScriptExtension",
+            "typeHandlerVersion": "1.2",
+            "settings": {
+              "fileUris": "https://github.com/ChaseManhatton/AXPOC_Template/blob/master/Scripts/",
+              "commandToExecute": "[concat('powershell -ExecutionPolicy Unrestricted -file ','InitDataDrive.ps1')]"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "apiVersion": "2015-06-15",
+      "type": "Microsoft.Compute/virtualMachines/extensions",
+      "name": "[toLower(concat(parameters('appServerHostNamePrefix'), 'batch', copyIndex(), '/JoinDomainExt'))]",
+      "location": "[resourceGroup().location]",
+      "dependsOn": [
+        "[concat('Microsoft.Compute/virtualMachines/', toLower(concat(parameters('appServerHostNamePrefix'), 'batch', copyIndex(), '/extensions/customscriptextension')))]"
+      ],
+      "properties": {
+        "protectedsettings": {
+          "Password": "[parameters('domainPassword')]"
+        },
+        "publisher": "Microsoft.Compute",
+        "settings": {
+          "Name": "[parameters('domainToJoin')]",
+          "User": "[concat(parameters('domainToJoin'), '\\', parameters('domainUsername'))]",
+          "Restart": "true",
+          "Options": "[parameters('domainJoinOptions')]"
+        },
+        "type": "JsonADDomainExtension",
+        "typeHandlerVersion": "1.0"
+      },
+      "copy": {
+        "name": "batchVMsJoinDomainExtCopy",
+        "count": "[parameters('batchServerCount')]"
       }
     }
   ],
