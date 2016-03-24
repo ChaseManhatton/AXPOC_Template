@@ -1,0 +1,523 @@
+﻿{
+  "$schema": "https://schema.management.azure.com/schemas/2015-01-01/deploymentTemplate.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "serverTypes": {
+      "type": "array",
+      "defaultValue": [
+        "batch",
+        "calc",
+        "lgcalc",
+        "common",
+        "download",
+        "migr",
+        "portal",
+        "ras"
+      ]
+    },
+    "appServerHostNamePrefix": {
+      "type": "string",
+      "metadata": {
+        "description": "Hostname prefix of app server?  Example: AXPOC"
+      }
+    },
+    "frontendSubnetCIDR": {
+      "type": "string",
+      "metadata": {
+        "description": "CIDR range of FE subnet? (i.e. 172.16.100.0/24)"
+      }
+    },
+    "frontendSubnetName": {
+      "type": "string",
+      "metadata": {
+        "description": "Name of frontend subnet (Example: FE)?"
+      }
+    },
+    "vnetName": {
+      "type": "string",
+      "metadata": {
+        "description": "Virtual Network Name (must be 1 word no special chars)?"
+      }
+    },
+    "calcServerCount": {
+      "type": "int",
+      "defaultValue": 2,
+      "minValue": 2,
+      "maxValue": 10,
+      "metadata": {
+        "description": "How many Calc servers?"
+      }
+    },
+    "lgCalcServerCount": {
+      "type": "int",
+      "defaultValue": 2,
+      "minValue": 2,
+      "maxValue": 10,
+      "metadata": {
+        "description": "How many Large Calc servers?"
+      }
+    },
+    "batchServerCount": {
+      "type": "int",
+      "defaultValue": 2,
+      "minValue": 2,
+      "maxValue": 10,
+      "metadata": {
+        "description": "How many Batch servers?"
+      }
+    },
+    "downloadServerCount": {
+      "type": "int",
+      "defaultValue": 2,
+      "minValue": 2,
+      "maxValue": 10,
+      "metadata": {
+        "description": "How many Download servers?"
+      }
+    },
+    "migrationServerCount": {
+      "type": "int",
+      "defaultValue": 2,
+      "minValue": 2,
+      "maxValue": 10,
+      "metadata": {
+        "description": "How many Migration servers?"
+      }
+    },
+    "commonServerCount": {
+      "type": "int",
+      "defaultValue": 2,
+      "minValue": 2,
+      "maxValue": 10,
+      "metadata": {
+        "description": "How many Common servers?"
+      }
+    },
+    "rasServerCount": {
+      "type": "int",
+      "defaultValue": 2,
+      "minValue": 2,
+      "maxValue": 10,
+      "metadata": {
+        "description": "How many RAS servers?"
+      }
+    },
+    "portalServerCount": {
+      "type": "int",
+      "defaultValue": 2,
+      "minValue": 2,
+      "maxValue": 10,
+      "metadata": {
+        "description": "How many Portal servers?"
+      }
+    },
+    "vmAdminUserName": {
+      "type": "string",
+      "defaultValue": "wkazadmin",
+      "minLength": 5,
+      "metadata": {
+        "description": "VM Admin Username?"
+      }
+    },
+    "vmAdminPassword": {
+      "type": "securestring",
+      "minLength": 8,
+      "metadata": {
+        "description": "VM Admin Password (8 Character Minimum)?"
+      }
+    },
+    "VMStorageAccountType": {
+      "type": "string",
+      "defaultValue": "Standard_LRS",
+      "allowedValues": [
+        "Standard_LRS",
+        "Standard_ZRS",
+        "Standard_GRS",
+        "Standard_RAGRS",
+        "Premium_LRS"
+      ]
+    },
+    "VMsWindowsOSVersion": {
+      "type": "string",
+      "defaultValue": "2012-R2-Datacenter",
+      "allowedValues": [
+        "2008-R2-SP1",
+        "2012-Datacenter",
+        "2012-R2-Datacenter",
+        "Windows-Server-Technical-Preview"
+      ]
+    }
+  },
+  "variables": {
+    "batchFullHostPrefix": "[concat(parameters('appServerHostNamePrefix'),'BATCH')]",
+    "calcFullHostPrefix": "[concat(parameters('appServerHostNamePrefix'),'CALC')]",
+    "lgCalcFullHostPrefix": "[concat(parameters('appServerHostNamePrefix'),'LGCALC')]",
+    "commonFullHostPrefix": "[concat(parameters('appServerHostNamePrefix'),'COMMON')]",
+    "downloadFullHostPrefix": "[concat(parameters('appServerHostNamePrefix'),'DOWNLOAD')]",
+    "migrationFullHostPrefix": "[concat(parameters('appServerHostNamePrefix'),'MIGR')]",
+    "portalFullHostPrefix": "[concat(parameters('appServerHostNamePrefix'),'PORTAL')]",
+    "rasFullHostPrefix": "[concat(parameters('appServerHostNamePrefix'),'RAS')]",
+    "AxcessPOCFESubnetName": "[parameters('frontendSubnetName')]",
+    "AxcessPOCFESubnetCIDR": "[parameters('frontendSubnetCIDR')]",
+    "appServerNICsVnetID": "[resourceId('AxcessPOC_VNET', 'Microsoft.Network/virtualNetworks', parameters('vnetName'))]",
+    "appServerNICsSubnetRef": "[concat(variables('appServerNICsVnetID'), '/subnets/', variables('AxcessPOCFESubnetName'))]",
+    "batchStorageAccountName": "[concat('batchStorageAccount', uniqueString(resourceGroup().id))]",
+    "TestVNETPrefix": "10.0.0.0/16",
+    "TestVNETSubnet1Name": "Subnet-1",
+    "TestVNETSubnet1Prefix": "10.0.0.0/24",
+    "TestVNETSubnet2Name": "Subnet-2",
+    "TestVNETSubnet2Prefix": "10.0.1.0/24",
+    "batchVMsImagePublisher": "MicrosoftWindowsServer",
+    "batchVMsImageOffer": "WindowsServer",
+    "batchVMsOSDiskName": "batchVMsOSDisk",
+    "batchVMsVmSize": "Standard_D1",
+    "batchVMsVnetID": "[resourceId('Microsoft.Network/virtualNetworks', 'TestVNET')]",
+    "batchVMsSubnetRef": "[concat(variables('batchVMsVnetID'), '/subnets/', variables('TestVNETSubnet1Name'))]",
+    "batchVMsStorageAccountContainerName": "vhds",
+    "batchVMsNicName": "[concat(parameters('batchVMsName'), 'NetworkInterface')]"
+  },
+  "resources": [
+    {
+      "name": "[toLower(concat(parameters('appServerHostNamePrefix'), parameters('serverTypes')[copyIndex()]))]",
+      "type": "Microsoft.Compute/availabilitySets",
+      "location": "[resourceGroup().location]",
+      "apiVersion": "2015-06-15",
+      "tags": {
+        "displayName": "appServerAvailSets"
+      },
+      "properties": {
+        "platformFaultDomainCount": 2,
+        "platformUpdateDomainCount": 2
+      },
+      "copy": {
+        "count": "[length(parameters('serverTypes'))]",
+        "name": "appServerAvailSetsCopy"
+      }
+    },
+    {
+      "name": "[toLower(concat(parameters('appServerHostNamePrefix'), 'batch', copyIndex()))]",
+      "type": "Microsoft.Network/networkInterfaces",
+      "location": "[resourceGroup().location]",
+      "apiVersion": "2015-06-15",
+      "tags": {
+        "displayName": "batchServerNICs"
+      },
+      "properties": {
+        "ipConfigurations": [
+          {
+            "name": "FEAdapter",
+            "properties": {
+              "privateIPAllocationMethod": "Dynamic",
+              "subnet": {
+                "id": "[variables('appServerNICsSubnetRef')]"
+              }
+            }
+          }
+        ]
+      },
+      "copy": {
+        "name": "batchServerNICsCopy",
+        "count": "[parameters('batchServerCount')]"
+      }
+    },
+    {
+      "name": "[toLower(concat(parameters('appServerHostNamePrefix'), 'calc', copyIndex()))]",
+      "type": "Microsoft.Network/networkInterfaces",
+      "location": "[resourceGroup().location]",
+      "apiVersion": "2015-06-15",
+      "tags": {
+        "displayName": "calcServerNICs"
+      },
+      "properties": {
+        "ipConfigurations": [
+          {
+            "name": "FEAdapter",
+            "properties": {
+              "privateIPAllocationMethod": "Dynamic",
+              "subnet": {
+                "id": "[variables('appServerNICsSubnetRef')]"
+              }
+            }
+          }
+        ]
+      },
+      "copy": {
+        "name": "calcServerNICsCopy",
+        "count": "[parameters('calcServerCount')]"
+      }
+    },
+    {
+      "name": "[toLower(concat(parameters('appServerHostNamePrefix'), 'lgcalc', copyIndex()))]",
+      "type": "Microsoft.Network/networkInterfaces",
+      "location": "[resourceGroup().location]",
+      "apiVersion": "2015-06-15",
+      "tags": {
+        "displayName": "lgCalcServerNICs"
+      },
+      "properties": {
+        "ipConfigurations": [
+          {
+            "name": "FEAdapter",
+            "properties": {
+              "privateIPAllocationMethod": "Dynamic",
+              "subnet": {
+                "id": "[variables('appServerNICsSubnetRef')]"
+              }
+            }
+          }
+        ]
+      },
+      "copy": {
+        "name": "lgCalcServerNICsCopy",
+        "count": "[parameters('lgCalcServerCount')]"
+      }
+    },
+    {
+      "name": "[toLower(concat(parameters('appServerHostNamePrefix'), 'common', copyIndex()))]",
+      "type": "Microsoft.Network/networkInterfaces",
+      "location": "[resourceGroup().location]",
+      "apiVersion": "2015-06-15",
+      "tags": {
+        "displayName": "commonServerNICs"
+      },
+      "properties": {
+        "ipConfigurations": [
+          {
+            "name": "FEAdapter",
+            "properties": {
+              "privateIPAllocationMethod": "Dynamic",
+              "subnet": {
+                "id": "[variables('appServerNICsSubnetRef')]"
+              }
+            }
+          }
+        ]
+      },
+      "copy": {
+        "name": "commonServerNICsCopy",
+        "count": "[parameters('commonServerCount')]"
+      }
+    },
+    {
+      "name": "[toLower(concat(parameters('appServerHostNamePrefix'), 'download', copyIndex()))]",
+      "type": "Microsoft.Network/networkInterfaces",
+      "location": "[resourceGroup().location]",
+      "apiVersion": "2015-06-15",
+      "tags": {
+        "displayName": "downloadServerNICs"
+      },
+      "properties": {
+        "ipConfigurations": [
+          {
+            "name": "FEAdapter",
+            "properties": {
+              "privateIPAllocationMethod": "Dynamic",
+              "subnet": {
+                "id": "[variables('appServerNICsSubnetRef')]"
+              }
+            }
+          }
+        ]
+      },
+      "copy": {
+        "name": "downloadServerNICsCopy",
+        "count": "[parameters('downloadServerCount')]"
+      }
+    },
+    {
+      "name": "[toLower(concat(parameters('appServerHostNamePrefix'), 'migr', copyIndex()))]",
+      "type": "Microsoft.Network/networkInterfaces",
+      "location": "[resourceGroup().location]",
+      "apiVersion": "2015-06-15",
+      "tags": {
+        "displayName": "migrServerNICs"
+      },
+      "properties": {
+        "ipConfigurations": [
+          {
+            "name": "FEAdapter",
+            "properties": {
+              "privateIPAllocationMethod": "Dynamic",
+              "subnet": {
+                "id": "[variables('appServerNICsSubnetRef')]"
+              }
+            }
+          }
+        ]
+      },
+      "copy": {
+        "name": "migrServerNICsCopy",
+        "count": "[parameters('migrationServerCount')]"
+      }
+    },
+    {
+      "name": "[toLower(concat(parameters('appServerHostNamePrefix'), 'portal', copyIndex()))]",
+      "type": "Microsoft.Network/networkInterfaces",
+      "location": "[resourceGroup().location]",
+      "apiVersion": "2015-06-15",
+      "tags": {
+        "displayName": "portalServerNICs"
+      },
+      "properties": {
+        "ipConfigurations": [
+          {
+            "name": "FEAdapter",
+            "properties": {
+              "privateIPAllocationMethod": "Dynamic",
+              "subnet": {
+                "id": "[variables('appServerNICsSubnetRef')]"
+              }
+            }
+          }
+        ]
+      },
+      "copy": {
+        "name": "portalServerNICsCopy",
+        "count": "[parameters('portalServerCount')]"
+      }
+    },
+    {
+      "name": "[toLower(concat(parameters('appServerHostNamePrefix'), 'ras', copyIndex()))]",
+      "type": "Microsoft.Network/networkInterfaces",
+      "location": "[resourceGroup().location]",
+      "apiVersion": "2015-06-15",
+      "tags": {
+        "displayName": "rasServerNICs"
+      },
+      "properties": {
+        "ipConfigurations": [
+          {
+            "name": "FEAdapter",
+            "properties": {
+              "privateIPAllocationMethod": "Dynamic",
+              "subnet": {
+                "id": "[variables('appServerNICsSubnetRef')]"
+              }
+            }
+          }
+        ]
+      },
+      "copy": {
+        "name": "rasServerNICsCopy",
+        "count": "[parameters('rasServerCount')]"
+      }
+    },
+    {
+      "name": "[variables('batchStorageAccountName')]",
+      "type": "Microsoft.Storage/storageAccounts",
+      "location": "[resourceGroup().location]",
+      "apiVersion": "2015-06-15",
+      "dependsOn": [ ],
+      "tags": {
+        "displayName": "batchStorageAccount"
+      },
+      "properties": {
+        "accountType": "[parameters('batchStorageAccountType')]"
+      }
+    },
+    {
+      "name": "TestVNET",
+      "type": "Microsoft.Network/virtualNetworks",
+      "location": "[resourceGroup().location]",
+      "apiVersion": "2015-06-15",
+      "dependsOn": [ ],
+      "tags": {
+        "displayName": "TestVNET"
+      },
+      "properties": {
+        "addressSpace": {
+          "addressPrefixes": [
+            "[variables('TestVNETPrefix')]"
+          ]
+        },
+        "subnets": [
+          {
+            "name": "[variables('TestVNETSubnet1Name')]",
+            "properties": {
+              "addressPrefix": "[variables('TestVNETSubnet1Prefix')]"
+            }
+          },
+          {
+            "name": "[variables('TestVNETSubnet2Name')]",
+            "properties": {
+              "addressPrefix": "[variables('TestVNETSubnet2Prefix')]"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "[variables('batchVMsNicName')]",
+      "type": "Microsoft.Network/networkInterfaces",
+      "location": "[resourceGroup().location]",
+      "apiVersion": "2015-06-15",
+      "dependsOn": [
+        "[concat('Microsoft.Network/virtualNetworks/', 'TestVNET')]"
+      ],
+      "tags": {
+        "displayName": "batchVMsNic"
+      },
+      "properties": {
+        "ipConfigurations": [
+          {
+            "name": "ipconfig1",
+            "properties": {
+              "privateIPAllocationMethod": "Dynamic",
+              "subnet": {
+                "id": "[variables('batchVMsSubnetRef')]"
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "[parameters('batchVMsName')]",
+      "type": "Microsoft.Compute/virtualMachines",
+      "location": "[resourceGroup().location]",
+      "apiVersion": "2015-06-15",
+      "dependsOn": [
+        "[concat('Microsoft.Storage/storageAccounts/', variables('batchStorageAccountName'))]",
+        "[concat('Microsoft.Network/networkInterfaces/', variables('batchVMsNicName'))]"
+      ],
+      "tags": {
+        "displayName": "batchVMs"
+      },
+      "properties": {
+        "hardwareProfile": {
+          "vmSize": "[variables('batchVMsVmSize')]"
+        },
+        "osProfile": {
+          "computerName": "[parameters('batchVMsName')]",
+          "adminUsername": "[parameters('batchVMsAdminUsername')]",
+          "adminPassword": "[parameters('batchVMsAdminPassword')]"
+        },
+        "storageProfile": {
+          "imageReference": {
+            "publisher": "[variables('batchVMsImagePublisher')]",
+            "offer": "[variables('batchVMsImageOffer')]",
+            "sku": "[parameters('batchVMsWindowsOSVersion')]",
+            "version": "latest"
+          },
+          "osDisk": {
+            "name": "batchVMsOSDisk",
+            "vhd": {
+              "uri": "[concat('http://', variables('batchStorageAccountName'), '.blob.core.windows.net/', variables('batchVMsStorageAccountContainerName'), '/', variables('batchVMsOSDiskName'), '.vhd')]"
+            },
+            "caching": "ReadWrite",
+            "createOption": "FromImage"
+          }
+        },
+        "networkProfile": {
+          "networkInterfaces": [
+            {
+              "id": "[resourceId('Microsoft.Network/networkInterfaces', variables('batchVMsNicName'))]"
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "outputs": {
+  }
+}
